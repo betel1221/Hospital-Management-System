@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0969da;
+  --color-secondary: #f6f8fa;
+  --color-danger: #cf222e;
+  --color-success: #1a7f37;
+  --font-sans: "Inter", "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased font-sans;
+  }
+}
