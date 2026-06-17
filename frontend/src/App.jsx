@@ -8,6 +8,8 @@ import PatientRecords from './pages/PatientRecords';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Landing from './pages/Landing';
+import EPrescribing from './pages/EPrescribing';
+import Settings from './pages/Settings';
 import ChatbotWidget from './components/ChatbotWidget';
 import { AuthProvider, AuthContext } from './context/AuthContext';
 import './index.css';
@@ -43,8 +45,8 @@ function App() {
           <Route path="/dashboard" element={<ProtectedRoute><MainLayout><Dashboard /></MainLayout></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute><MainLayout><AppointmentsQueue /></MainLayout></ProtectedRoute>} />
           <Route path="/patients" element={<ProtectedRoute><MainLayout><PatientRecords /></MainLayout></ProtectedRoute>} />
-          <Route path="/eprescribing" element={<ProtectedRoute><MainLayout><div className="p-8"><h2 className="text-2xl font-bold">E-Prescribing</h2></div></MainLayout></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><MainLayout><div className="p-8"><h2 className="text-2xl font-bold">Settings</h2></div></MainLayout></ProtectedRoute>} />
+          <Route path="/eprescribing" element={<ProtectedRoute><MainLayout><EPrescribing /></MainLayout></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><MainLayout><Settings /></MainLayout></ProtectedRoute>} />
         </Routes>
       </AuthProvider>
     </Router>

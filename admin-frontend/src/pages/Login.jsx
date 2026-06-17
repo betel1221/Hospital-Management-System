@@ -1,7 +1,7 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { Shield, Mail, Lock } from 'lucide-react';
+import { Shield, Mail, Lock, ArrowLeft } from 'lucide-react';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -9,8 +9,14 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  const { login } = useContext(AuthContext);
+  const { user, login } = useContext(AuthContext);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,8 +34,23 @@ const Login = () => {
     setIsLoading(false);
   };
 
+  const handleQuickLogin = async (demoEmail, demoPassword) => {
+    setError('');
+    setIsLoading(true);
+    const result = await login(demoEmail, demoPassword);
+    if (result.success) {
+      navigate('/dashboard');
+    } else {
+      setError(result.message);
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans text-slate-100">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans text-slate-100 relative">
+      <a href="http://localhost:5173" className="absolute top-6 left-6 w-10 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white shadow-sm border border-slate-800 flex items-center justify-center transition-all">
+        <ArrowLeft size={18} />
+      </a>
       <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 shadow-2xl border border-slate-800">
         
         <div className="flex flex-col items-center mb-8">
@@ -86,7 +107,18 @@ const Login = () => {
           </button>
         </form>
 
-        <div className="mt-8 text-center text-xs text-slate-500 font-medium border-t border-slate-800/60 pt-6">
+        <div className="mt-6 pt-6 border-t border-slate-800/60">
+          <button
+            type="button"
+            onClick={() => handleQuickLogin('admin@hms.com', 'HMSAdmin@2026!SecurePortal')}
+            disabled={isLoading}
+            className="w-full py-2.5 bg-blue-950/40 hover:bg-blue-900/40 text-blue-400 font-bold rounded-2xl border border-blue-500/20 text-xs cursor-pointer transition-all disabled:opacity-60"
+          >
+            One-Click Demo Admin Login
+          </button>
+        </div>
+
+        <div className="mt-6 text-center text-xs text-slate-500 font-medium">
           Authorized personnel only. All access is logged and monitored.
         </div>
 

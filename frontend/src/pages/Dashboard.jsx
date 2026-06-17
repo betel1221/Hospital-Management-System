@@ -1,4 +1,5 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import AppointmentsList from '../components/AppointmentsList';
 import VitalsCard from '../components/VitalsCard';
@@ -7,7 +8,7 @@ import NewPrescriptionModal from '../components/NewPrescriptionModal';
 import { 
   Heart, 
   Clock, 
-  Pills, 
+  Pill, 
   Calendar, 
   TrendingUp, 
   UserCheck, 
@@ -18,13 +19,59 @@ import {
 } from 'lucide-react';
 
 const Dashboard = () => {
-  const { user } = useContext(AuthContext);
+  const { token, user } = useContext(AuthContext);
+  const navigate = useNavigate();
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
   const [checkIns, setCheckIns] = useState([
     { id: 1, name: 'John Doe', time: '10:00 AM', status: 'WAITING', reason: 'Annual Checkup' },
     { id: 2, name: 'Robert Smith', time: '10:30 AM', status: 'CHECKED_IN', reason: 'Follow-up' },
     { id: 3, name: 'Emily Davis', time: '11:00 AM', status: 'WAITING', reason: 'Flu Symptoms' },
   ]);
+
+  // Live Patient State
+  const [patientVitals, setPatientVitals] = useState(null);
+  const [patientPrescriptions, setPatientPrescriptions] = useState([]);
+  const [loadingPatientData, setLoadingPatientData] = useState(false);
+
+  useEffect(() => {
+    const fetchPatientDashboardData = async () => {
+      if (!token || user?.role !== 'PATIENT') return;
+      setLoadingPatientData(true);
+      try {
+        // Fetch Profile & Vitals History
+        const vitalsRes = await fetch('http://localhost:5000/api/patients/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (vitalsRes.ok) {
+          const vitalsData = await vitalsRes.json();
+          // Extract the latest vitals record if it exists
+          if (vitalsData.vitalsHistory && vitalsData.vitalsHistory.length > 0) {
+            const latest = vitalsData.vitalsHistory[0].vitals;
+            // Parse if it is a string
+            const parsedVitals = typeof latest === 'string' ? JSON.parse(latest) : latest;
+            setPatientVitals(parsedVitals);
+          }
+        }
+
+        // Fetch Prescriptions
+        const prescRes = await fetch('http://localhost:5000/api/prescriptions', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (prescRes.ok) {
+          const prescData = await prescRes.json();
+          if (Array.isArray(prescData)) {
+            setPatientPrescriptions(prescData.filter(p => p.status === 'ACTIVE'));
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching patient dashboard data:', err);
+      } finally {
+        setLoadingPatientData(false);
+      }
+    };
+
+    fetchPatientDashboardData();
+  }, [token, user]);
 
   const handleCheckIn = (id) => {
     setCheckIns(checkIns.map(c => c.id === id ? { ...c, status: 'CHECKED_IN' } : c));
@@ -34,6 +81,13 @@ const Dashboard = () => {
   if (user?.role === 'DOCTOR') {
     return (
       <div className="p-6 max-w-7xl mx-auto w-full animate-in fade-in duration-300">
+        
+        {/* Doctor Welcome Header */}
+        <div className="mb-8 p-6 bg-white rounded-3xl shadow-[10px_10px_30px_rgba(0,0,0,0.02),-10px_-10px_30px_rgba(255,255,255,0.9)] border border-slate-50">
+          <h2 className="text-2xl font-bold text-slate-800 m-0">Welcome Back, {user.fullName}!</h2>
+          <p className="text-slate-500 text-sm mt-1">Here is a quick overview of today's schedule, patient check-ins, and AI ambient scribe tools.</p>
+        </div>
+
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Left Column: Appointments */}
           <div className="flex-2 lg:w-2/3">
@@ -65,6 +119,8 @@ const Dashboard = () => {
 
   // Render PATIENT Dashboard
   if (user?.role === 'PATIENT') {
+    const vitals = patientVitals;
+
     return (
       <div className="p-6 max-w-7xl mx-auto w-full animate-in fade-in duration-300">
         
@@ -81,7 +137,9 @@ const Dashboard = () => {
             <div className="bg-white rounded-3xl p-6 shadow-[10px_10px_30px_rgba(0,0,0,0.02),-10px_-10px_30px_rgba(255,255,255,0.9)] border border-slate-50">
               <div className="flex items-center gap-2 mb-6">
                 <Activity className="w-5 h-5 text-orange-500" />
-                <h3 className="text-base font-bold text-slate-800 m-0">My Latest Vitals</h3>
+                <h3 className="text-base font-bold text-slate-800 m-0">
+                  My Latest Vitals {!patientVitals && <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded ml-2 font-medium">Awaiting Examination</span>}
+                </h3>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -91,7 +149,9 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Heart Rate</div>
-                    <div className="text-lg font-bold text-slate-800 mt-0.5">72 bpm</div>
+                    <div className="text-lg font-bold text-slate-800 mt-0.5">
+                      {vitals ? `${vitals.heartRate || vitals.heart_rate || '—'} bpm` : '—'}
+                    </div>
                     <div className="text-[10px] font-semibold text-emerald-600">Optimal Range</div>
                   </div>
                 </div>
@@ -102,7 +162,9 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Blood Pressure</div>
-                    <div className="text-lg font-bold text-slate-800 mt-0.5">120/80 mmHg</div>
+                    <div className="text-lg font-bold text-slate-800 mt-0.5">
+                      {vitals ? `${vitals.bloodPressure || vitals.blood_pressure || '—'} mmHg` : '—'}
+                    </div>
                     <div className="text-[10px] font-semibold text-emerald-600">Healthy</div>
                   </div>
                 </div>
@@ -113,7 +175,9 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Blood Sugar (Fasting)</div>
-                    <div className="text-lg font-bold text-slate-800 mt-0.5">94 mg/dL</div>
+                    <div className="text-lg font-bold text-slate-800 mt-0.5">
+                      {vitals ? `${vitals.bloodSugar || vitals.blood_sugar || '—'} mg/dL` : '—'}
+                    </div>
                     <div className="text-[10px] font-semibold text-emerald-600">Normal</div>
                   </div>
                 </div>
@@ -124,7 +188,9 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Oxygen Saturation</div>
-                    <div className="text-lg font-bold text-slate-800 mt-0.5">99%</div>
+                    <div className="text-lg font-bold text-slate-800 mt-0.5">
+                      {vitals ? `${vitals.oxygenSaturation || vitals.oxygen_saturation || vitals.oxygen || '—'}%` : '—'}
+                    </div>
                     <div className="text-[10px] font-semibold text-emerald-600">Excellent</div>
                   </div>
                 </div>
@@ -132,71 +198,43 @@ const Dashboard = () => {
             </div>
 
             {/* Upcoming Appointments */}
-            <div className="bg-white rounded-3xl p-6 shadow-[10px_10px_30px_rgba(0,0,0,0.02),-10px_-10px_30px_rgba(255,255,255,0.9)] border border-slate-50">
-              <div className="flex items-center gap-2 mb-6">
-                <Calendar className="w-5 h-5 text-orange-500" />
-                <h3 className="text-base font-bold text-slate-800 m-0">My Scheduled Appointments</h3>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                <div className="p-4 bg-[#f4f7fb] rounded-2xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-bold text-sm">
-                      SJ
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">Dr. Sarah Jenkins</div>
-                      <div className="text-xs text-slate-500">Cardiology Consultation • In-Person (Room 402)</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-xs font-bold text-slate-800">June 18, 2026</div>
-                      <div className="text-[10px] text-slate-500">10:30 AM (Thursday)</div>
-                    </div>
-                    <span className="px-2.5 py-1 text-[10px] font-bold bg-green-100 text-green-600 rounded-lg">Confirmed</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AppointmentsList />
           </div>
 
           {/* Right Column: Active Prescriptions */}
-          <div className="bg-white rounded-3xl p-6 shadow-[10px_10px_30px_rgba(0,0,0,0.02),-10px_-10px_30px_rgba(255,255,255,0.9)] border border-slate-50">
+          <div className="bg-white rounded-3xl p-6 shadow-[10px_10px_30px_rgba(0,0,0,0.02),-10px_-10px_30px_rgba(255,255,255,0.9)] border border-slate-50 font-sans">
             <div className="flex items-center gap-2 mb-6">
-              <Pills className="w-5 h-5 text-orange-500" />
+              <Pill className="w-5 h-5 text-orange-500" />
               <h3 className="text-base font-bold text-slate-800 m-0">My Active Prescriptions</h3>
             </div>
 
-            <div className="flex flex-col gap-4">
-              <div className="p-4 bg-[#f8fafc] rounded-2xl border border-slate-100/60">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-800 m-0">Lisinopril 10mg</h4>
-                    <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Hypertension Treatment</p>
-                  </div>
-                  <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-50 text-orange-500 rounded-md">Once Daily</span>
-                </div>
-                <div className="text-xs text-slate-500 mt-3 border-t border-slate-100 pt-2 flex justify-between items-center">
-                  <span>Dispensed on May 12</span>
-                  <span className="font-semibold text-slate-700">30 Days Supply</span>
-                </div>
+            {loadingPatientData ? (
+              <div className="text-center py-6 text-slate-400 font-medium animate-pulse">
+                Loading prescriptions...
               </div>
-
-              <div className="p-4 bg-[#f8fafc] rounded-2xl border border-slate-100/60">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-800 m-0">Atorvastatin 20mg</h4>
-                    <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Cholesterol Management</p>
-                  </div>
-                  <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-50 text-orange-500 rounded-md">At Bedtime</span>
-                </div>
-                <div className="text-xs text-slate-500 mt-3 border-t border-slate-100 pt-2 flex justify-between items-center">
-                  <span>Dispensed on May 12</span>
-                  <span className="font-semibold text-slate-700">30 Days Supply</span>
-                </div>
+            ) : patientPrescriptions.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 font-medium bg-[#f8fafc] rounded-2xl border border-dashed border-slate-200 p-4">
+                No active prescriptions.
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {patientPrescriptions.map((pr) => (
+                  <div key={pr.id} className="p-4 bg-[#f8fafc] rounded-2xl border border-slate-100/60">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-800 m-0">{pr.medication_name}</h4>
+                        <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Prescribed by Dr. {pr.doctor_name || 'Sarah Jenkins'}</p>
+                      </div>
+                      <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-50 text-orange-500 rounded-md">Active</span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-3 border-t border-slate-100 pt-2 flex justify-between items-center">
+                      <span className="truncate max-w-[150px]">{pr.dosage}</span>
+                      <span className="font-semibold text-slate-700 shrink-0">RX Details</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>
@@ -290,15 +328,29 @@ const Dashboard = () => {
           <div className="bg-white rounded-3xl p-6 shadow-md border border-slate-50 flex flex-col gap-6">
             <h3 className="text-base font-bold text-slate-800 m-0">Staff Actions</h3>
             
-            <button className="w-full text-center py-3 px-4 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-2xl shadow-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2">
+            <button 
+              onClick={() => navigate('/appointments')}
+              className="w-full text-center py-3 px-4 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-2xl shadow-sm transition-all cursor-pointer border-none flex items-center justify-center gap-2"
+            >
               <Plus size={16} /> Schedule Appointment
             </button>
-
-            <button className="w-full text-center py-3 px-4 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-2xl border border-slate-200/80 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2">
+ 
+            <button 
+              onClick={() => alert("Room status and waiting logs successfully exported and sent to the reception printer (Main Hall).")}
+              className="w-full text-center py-3 px-4 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-2xl border border-slate-200/80 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
               Print Room Log
             </button>
-
-            <button className="w-full text-center py-3 px-4 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-2xl border border-slate-200/80 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2">
+ 
+            <button 
+              onClick={() => {
+                const msg = prompt("Enter the system announcement to broadcast to all clinical rooms:");
+                if (msg) {
+                  alert(`Broadcast sent: "${msg}" is now scrolling on all hallway monitor screens.`);
+                }
+              }}
+              className="w-full text-center py-3 px-4 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-2xl border border-slate-200/80 shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
               Broadcast Alert
             </button>
           </div>

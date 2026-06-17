@@ -29,12 +29,40 @@ router.post('/register', async (req, res) => {
 
     // Create user
     const userId = uuidv4();
-    await db.query(
-      'INSERT INTO users (id, role, full_name, email, password_hash) VALUES (?, ?, ?, ?, ?)',
-      [userId, role, fullName, email, hashedPassword]
-    );
+    const conn = await db.getConnection();
 
-    res.status(201).json({ message: 'User registered successfully' });
+    try {
+      await conn.beginTransaction();
+
+      await conn.query(
+        'INSERT INTO users (id, role, full_name, email, password_hash) VALUES (?, ?, ?, ?, ?)',
+        [userId, role, fullName, email, hashedPassword]
+      );
+
+      if (role === 'PATIENT') {
+        const patientId = uuidv4();
+        // Insert with default dob/gender/emergency_contact/contact_info
+        await conn.query(
+          'INSERT INTO patients (id, user_id, dob, gender, contact_info, emergency_contact) VALUES (?, ?, NULL, NULL, ?, NULL)',
+          [patientId, userId, JSON.stringify({ phone: '', address: '' })]
+        );
+      } else if (role === 'DOCTOR') {
+        const doctorId = uuidv4();
+        // Insert with default specialty/license_num
+        await conn.query(
+          'INSERT INTO doctors (id, user_id, specialty, license_num, is_available) VALUES (?, ?, ?, ?, TRUE)',
+          [doctorId, userId, 'General Practice', 'LIC-' + Math.floor(100000 + Math.random() * 90000)]
+        );
+      }
+
+      await conn.commit();
+      res.status(201).json({ message: 'User registered successfully' });
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
   } catch (error) {
     console.error('Registration Error:', error);
     res.status(500).json({ message: 'Server error during registration' });

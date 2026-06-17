@@ -12,6 +12,9 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/appointments', require('./routes/appointments'));
+app.use('/api/prescriptions', require('./routes/prescriptions'));
+app.use('/api/patients', require('./routes/patients'));
 
 // Basic health check endpoint
 app.get('/api/health', (req, res) => {

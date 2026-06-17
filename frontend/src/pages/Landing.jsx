@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { 
@@ -14,8 +14,20 @@ import {
 } from 'lucide-react';
 
 const Landing = () => {
-  const { user } = useContext(AuthContext);
+  const { user, login } = useContext(AuthContext);
   const navigate = useNavigate();
+  const [demoError, setDemoError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleDemoLogin = async (email, password) => {
+    setDemoError('');
+    setIsLoggingIn(true);
+    const res = await login(email, password);
+    if (!res.success) {
+      setDemoError(res.message || 'Demo login failed');
+      setIsLoggingIn(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-tr from-[#f4f7fb] via-white to-[#edf2f9] text-slate-800 font-sans flex flex-col relative overflow-hidden">
@@ -82,17 +94,73 @@ const Landing = () => {
               onClick={() => navigate(user ? '/dashboard' : '/login')}
               className="px-8 py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl shadow-xl flex items-center justify-center gap-3 transition-all cursor-pointer border-none transform hover:-translate-y-0.5 active:translate-y-0"
             >
-              <span>Launch Command Center</span>
+              <span>{user ? 'Go to Dashboard' : 'Launch Command Center'}</span>
               <ChevronRight size={18} />
             </button>
             
-            <button 
-              onClick={() => navigate('/register')}
-              className="px-8 py-4 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-2xl border border-slate-200/80 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-            >
-              <span>Join as Patient</span>
-            </button>
+            {!user && (
+              <button 
+                onClick={() => navigate('/register')}
+                className="px-8 py-4 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-2xl border border-slate-200/80 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+              >
+                <span>Join as Patient</span>
+              </button>
+            )}
           </div>
+
+          {/* Quick Demo Access Console */}
+          {!user && (
+            <div className="mt-10 p-6 bg-white/70 backdrop-blur-md rounded-3xl border border-slate-200/50 shadow-[10px_10px_30px_rgba(0,0,0,0.02)] max-w-2xl mx-auto lg:mx-0">
+              <h3 className="text-sm font-extrabold text-slate-700 m-0 mb-4 flex items-center justify-center lg:justify-start gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>Instant Demo Login (Select a Role)</span>
+              </h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button
+                  onClick={() => handleDemoLogin('doctor@hms.com', 'Password123!')}
+                  disabled={isLoggingIn}
+                  className="py-3.5 px-4 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-bold rounded-2xl shadow-sm hover:shadow-md cursor-pointer border-none flex flex-col items-center justify-center gap-1 transition-all text-xs transform hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  <span className="font-black uppercase tracking-wider">Doctor</span>
+                  <span className="opacity-90 text-[9px] font-semibold">Dr. Sarah Jenkins (Cardiology)</span>
+                </button>
+                
+                <button
+                  onClick={() => handleDemoLogin('patient@hms.com', 'Password123!')}
+                  disabled={isLoggingIn}
+                  className="py-3.5 px-4 bg-[#2563eb] hover:bg-blue-700 disabled:opacity-60 text-white font-bold rounded-2xl shadow-sm hover:shadow-md cursor-pointer border-none flex flex-col items-center justify-center gap-1 transition-all text-xs transform hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  <span className="font-black uppercase tracking-wider">Patient</span>
+                  <span className="opacity-90 text-[9px] font-semibold">John Doe (Vitals & Rx)</span>
+                </button>
+
+                <button
+                  onClick={() => handleDemoLogin('staff@hms.com', 'Password123!')}
+                  disabled={isLoggingIn}
+                  className="py-3.5 px-4 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold rounded-2xl shadow-sm hover:shadow-md cursor-pointer border-none flex flex-col items-center justify-center gap-1 transition-all text-xs transform hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  <span className="font-black uppercase tracking-wider">Staff</span>
+                  <span className="opacity-90 text-[9px] font-semibold">Jane Staff (Operations Check-in)</span>
+                </button>
+              </div>
+
+              {isLoggingIn && (
+                <div className="text-[11px] font-bold text-orange-500 mt-3 text-center animate-pulse">
+                  Opening Clinical Workspace...
+                </div>
+              )}
+
+              {demoError && (
+                <div className="text-xs font-bold text-red-500 mt-3 text-center">
+                  {demoError}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Stats Bar */}
           <div className="mt-16 pt-8 border-t border-slate-200/60 flex flex-wrap gap-8 justify-center lg:justify-start">
