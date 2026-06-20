@@ -15,6 +15,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/prescriptions', require('./routes/prescriptions'));
 app.use('/api/patients', require('./routes/patients'));
+app.use('/api/ai', require('./routes/ai'));
 
 // Basic health check endpoint
 app.get('/api/health', (req, res) => {

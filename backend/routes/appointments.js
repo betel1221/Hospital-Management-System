@@ -187,4 +187,94 @@ router.put('/:id/status', async (req, res) => {
   }
 });
 
+// @route   PUT /api/appointments/:id/reschedule
+// @desc    Reschedule appointment (used by patients to set new date/time after rejection)
+// @access  Private
+router.put('/:id/reschedule', async (req, res) => {
+  const { scheduledFor, triageSymptoms } = req.body;
+  const appointmentId = req.params.id;
+
+  if (!scheduledFor) {
+    return res.status(400).json({ message: 'New date and time are required' });
+  }
+
+  try {
+    // Check if appointment exists
+    const [apts] = await db.query('SELECT * FROM appointments WHERE id = ?', [appointmentId]);
+    if (apts.length === 0) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+
+    // Call Gemini (or fallback helper) to update urgency score if symptoms are provided
+    let aiUrgencyScore = apts[0].ai_urgency_score || 'LOW';
+    if (triageSymptoms) {
+      try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (apiKey && apiKey !== 'your_gemini_api_key_here') {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+          const prompt = `Analyze these symptoms and output a JSON object containing:
+          - urgency: must be one of: "LOW", "MEDIUM", "HIGH"
+          - explanation: a short 1-sentence medical explanation.
+          Only output raw JSON.
+          Symptoms: "${triageSymptoms}"`;
+
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const text = data.candidates[0].content.parts[0].text;
+            let cleaned = text.trim();
+            if (cleaned.startsWith('```')) {
+              cleaned = cleaned.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+            }
+            const parsed = JSON.parse(cleaned);
+            if (parsed.urgency) {
+              aiUrgencyScore = parsed.urgency;
+            }
+          }
+        } else {
+          // Fallback triage logic
+          const txt = triageSymptoms.toLowerCase();
+          if (
+            txt.includes('chest') || 
+            txt.includes('breath') || 
+            txt.includes('stroke') || 
+            txt.includes('unconscious') || 
+            txt.includes('bleeding') || 
+            txt.includes('fracture') || 
+            txt.includes('severe')
+          ) {
+            aiUrgencyScore = "HIGH";
+          } else if (
+            txt.includes('fever') || 
+            txt.includes('pain') || 
+            txt.includes('vomit') || 
+            txt.includes('cough')
+          ) {
+            aiUrgencyScore = "MEDIUM";
+          } else {
+            aiUrgencyScore = "LOW";
+          }
+        }
+      } catch (err) {
+        console.warn('AI Triage failed during reschedule:', err);
+      }
+    }
+
+    await db.query(`
+      UPDATE appointments 
+      SET scheduled_for = ?, triage_symptoms = ?, status = 'PENDING', ai_urgency_score = ?
+      WHERE id = ?
+    `, [scheduledFor, triageSymptoms || '', aiUrgencyScore, appointmentId]);
+
+    res.json({ message: 'Appointment rescheduled successfully', aiUrgencyScore });
+  } catch (error) {
+    console.error('Reschedule Appointment Error:', error);
+    res.status(500).json({ message: 'Server error rescheduling appointment' });
+  }
+});
+
 module.exports = router;

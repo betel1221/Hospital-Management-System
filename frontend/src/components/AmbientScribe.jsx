@@ -51,6 +51,45 @@ const AmbientScribe = () => {
     }
   }, [token]);
 
+  // Web Speech API and Scenario Preset States
+  const [recognition, setRecognition] = useState(null);
+  const [transcribedText, setTranscribedText] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('');
+
+  const presets = {
+    cardiac: "Doctor: Hello. What brings you in today? Patient: I've been feeling this heavy pressure in my chest for the past day, especially when I walk up stairs. It also feels like a dull ache in my left shoulder. Doctor: Any shortness of breath or dizziness? Patient: Yes, I feel short of breath and a bit sweaty. Doctor: Let's record your vitals. Heart rate is 85, blood pressure is 135/85. Fasting sugar is 105, oxygen saturation is 97. Let's order an ECG.",
+    headache: "Doctor: How can I help you today? Patient: I have this terrible throbbing headache on the right side of my head. It's been going on for two days. Light really hurts my eyes. Doctor: Any nausea or vomiting? Patient: Yes, a little nauseous. Ibuprofen isn't helping much. Doctor: We'll prescribe sumatriptan and suggest resting in a dark room. Vitals are normal: heart rate 72, blood pressure 120/80.",
+    flu: "Doctor: Tell me about your symptoms. Patient: I've had a dry cough, sore throat, and a fever of 101 degrees since yesterday. My whole body aches. Doctor: Lungs show some rhonchi but are mostly clear. Let's suggest hydration, rest, and ibuprofen. Vitals: heart rate 80, temperature 101, oxygen 98%."
+  };
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onresult = (event) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setTranscribedText(prev => (prev + ' ' + finalTranscript).trim());
+        }
+      };
+
+      rec.onerror = (e) => {
+        console.error('Speech recognition error:', e);
+      };
+
+      setRecognition(rec);
+    }
+  }, []);
+
   // Audio Recording Simulation waves
   const [waveHeights, setWaveHeights] = useState([4, 10, 6, 12, 8, 4, 10, 6, 12, 8]);
   useEffect(() => {
@@ -68,9 +107,20 @@ const AmbientScribe = () => {
       alert("Please select a patient first.");
       return;
     }
+    setTranscribedText('');
+    setSelectedPreset('');
     setIsRecording(true);
     setShowEditor(false);
     setSaveStatus('idle');
+    setErrorMessage('');
+
+    if (recognition) {
+      try {
+        recognition.start();
+      } catch (err) {
+        console.error('Failed to start recognition:', err);
+      }
+    }
   };
 
   const handleStopRecording = () => {
@@ -78,17 +128,111 @@ const AmbientScribe = () => {
     setIsProcessing(true);
     setProcessingStep(0);
 
-    // Simulate AI extraction pipeline
-    setTimeout(() => {
-      setProcessingStep(1); // transcribing
-      setTimeout(() => {
-        setProcessingStep(2); // structuring
-        setTimeout(() => {
-          setIsProcessing(false);
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch (err) {
+        console.error('Failed to stop recognition:', err);
+      }
+    }
+
+    setTimeout(async () => {
+      setProcessingStep(1); // Transcribing dialogue...
+      const finalDialog = transcribedText.trim() || presets.headache;
+      
+      try {
+        setProcessingStep(2); // AI structuring SOAP note...
+        const response = await fetch('http://localhost:5000/api/ai/scribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ transcript: finalDialog })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+          setSoapNote({
+            subjective: data.subjective || '',
+            objective: data.objective || '',
+            assessment: data.assessment || '',
+            plan: data.plan || ''
+          });
+          if (data.vitals) {
+            setVitalsInput({
+              heartRate: data.vitals.heartRate ? String(data.vitals.heartRate) : '',
+              bloodPressure: data.vitals.bloodPressure || '',
+              bloodSugar: data.vitals.bloodSugar ? String(data.vitals.bloodSugar) : '',
+              oxygenSaturation: data.vitals.oxygenSaturation ? String(data.vitals.oxygenSaturation) : ''
+            });
+          }
           setShowEditor(true);
-        }, 1500);
-      }, 1500);
-    }, 1200);
+        } else {
+          setErrorMessage(data.message || 'Failed to structure SOAP notes.');
+        }
+      } catch (err) {
+        console.error('Scribe API Error:', err);
+        setErrorMessage('Failed to connect to AI Scribe endpoint.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }, 1500);
+  };
+
+  const handlePresetSelect = async (presetKey) => {
+    if (!selectedPatientId) {
+      alert("Please select a patient first.");
+      return;
+    }
+    if (!presetKey) return;
+    
+    setSelectedPreset(presetKey);
+    setIsProcessing(true);
+    setProcessingStep(0);
+    setErrorMessage('');
+    setShowEditor(false);
+
+    setTimeout(async () => {
+      setProcessingStep(1); // Loading preset...
+      try {
+        setProcessingStep(2); // AI structuring SOAP note...
+        const response = await fetch('http://localhost:5000/api/ai/scribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ transcript: presets[presetKey] })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+          setSoapNote({
+            subjective: data.subjective || '',
+            objective: data.objective || '',
+            assessment: data.assessment || '',
+            plan: data.plan || ''
+          });
+          if (data.vitals) {
+            setVitalsInput({
+              heartRate: data.vitals.heartRate ? String(data.vitals.heartRate) : '',
+              bloodPressure: data.vitals.bloodPressure || '',
+              bloodSugar: data.vitals.bloodSugar ? String(data.vitals.bloodSugar) : '',
+              oxygenSaturation: data.vitals.oxygenSaturation ? String(data.vitals.oxygenSaturation) : ''
+            });
+          }
+          setShowEditor(true);
+        } else {
+          setErrorMessage(data.message || 'Failed to structure SOAP notes.');
+        }
+      } catch (err) {
+        console.error('Scribe API Error:', err);
+        setErrorMessage('Failed to connect to AI Scribe endpoint.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }, 1000);
   };
 
   const handleSaveToChart = async () => {
@@ -210,16 +354,32 @@ ${soapNote.plan}
               </button>
             </div>
           ) : (
-            <div>
-              <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed ml-1">
-                Voice-to-text scribe is idle. Select a patient and click start to record the consultation audio.
-              </p>
-              <button 
-                onClick={handleStartRecording}
-                className="w-full py-3 bg-[#f4f7fb] text-orange-500 hover:text-orange-600 font-bold rounded-2xl shadow-[5px_5px_10px_#e6e9ed,-5px_-5px_10px_#ffffff] active:shadow-[inset_2px_2px_5px_#e6e9ed,inset_-2px_-2px_5px_#ffffff] transition-all cursor-pointer border-none flex justify-center items-center gap-2"
-              >
-                <Mic className="w-5 h-5" /> Start Scribing Session
-              </button>
+            <div className="flex flex-col gap-4">
+              <div>
+                <p className="text-xs text-slate-500 font-medium mb-3 leading-relaxed ml-1">
+                  Voice-to-text scribe is idle. Select a patient and click start to record the consultation audio.
+                </p>
+                <button 
+                  onClick={handleStartRecording}
+                  className="w-full py-3 bg-[#f4f7fb] text-orange-500 hover:text-orange-600 font-bold rounded-2xl shadow-[5px_5px_10px_#e6e9ed,-5px_-5px_10px_#ffffff] active:shadow-[inset_2px_2px_5px_#e6e9ed,inset_-2px_-2px_5px_#ffffff] transition-all cursor-pointer border-none flex justify-center items-center gap-2 mb-2"
+                >
+                  <Mic className="w-5 h-5" /> Start Scribing Session
+                </button>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Or Load Clinical Scenario Preset</label>
+                <select
+                  value={selectedPreset}
+                  onChange={(e) => handlePresetSelect(e.target.value)}
+                  className="w-full bg-[#f4f7fb] p-3 rounded-2xl border border-transparent font-semibold text-xs text-slate-600 outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all cursor-pointer"
+                >
+                  <option value="">-- Choose Preset Dialogue --</option>
+                  <option value="cardiac">Cardiac Checkup (Chest Pain)</option>
+                  <option value="headache">Severe Migraine (Headache)</option>
+                  <option value="flu">Seasonal Flu (Fever & Cough)</option>
+                </select>
+              </div>
             </div>
           )}
         </div>

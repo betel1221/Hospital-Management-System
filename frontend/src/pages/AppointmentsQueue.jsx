@@ -3,7 +3,7 @@ import { Search, Filter, MoreHorizontal, User, Clock, Video, Calendar as Calenda
 import { AuthContext } from '../context/AuthContext';
 
 const AppointmentsQueue = () => {
-  const { token } = useContext(AuthContext);
+  const { token, user } = useContext(AuthContext);
   const [appointments, setAppointments] = useState([]);
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,6 +14,11 @@ const AppointmentsQueue = () => {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isRescheduleMode, setIsRescheduleMode] = useState(false);
+  const [rescheduleTargetId, setRescheduleTargetId] = useState(null);
+  const [isTriageLoading, setIsTriageLoading] = useState(false);
+  const [triageSuggestion, setTriageSuggestion] = useState(null);
+
   const [newAppt, setNewAppt] = useState({
     patientId: '',
     scheduledFor: '',
@@ -78,30 +83,86 @@ const AppointmentsQueue = () => {
     }
   };
 
-  const handleScheduleSubmit = async (e) => {
-    e.preventDefault();
-    setModalError('');
-    setIsSubmitting(true);
-
-    if (!newAppt.patientId || !newAppt.scheduledFor) {
-      setModalError('Patient and date/time are required.');
-      setIsSubmitting(false);
+  const handleAiTriage = async () => {
+    if (!newAppt.triageSymptoms.trim()) {
+      alert("Please enter some symptoms first.");
       return;
     }
+    setIsTriageLoading(true);
+    setTriageSuggestion(null);
 
     try {
-      const response = await fetch('http://localhost:5000/api/appointments', {
+      const response = await fetch('http://localhost:5000/api/ai/triage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(newAppt)
+        body: JSON.stringify({ symptoms: newAppt.triageSymptoms })
       });
+      const data = await response.json();
+      if (response.ok) {
+        setNewAppt(prev => ({ ...prev, aiUrgencyScore: data.urgency }));
+        setTriageSuggestion(data.explanation);
+      }
+    } catch (err) {
+      console.error('AI Triage error:', err);
+    } finally {
+      setIsTriageLoading(false);
+    }
+  };
+
+  const handleScheduleSubmit = async (e) => {
+    e.preventDefault();
+    setModalError('');
+    setIsSubmitting(true);
+
+    if (user?.role !== 'PATIENT' && !newAppt.patientId) {
+      setModalError('Patient selection is required.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (!newAppt.scheduledFor) {
+      setModalError('Date and time are required.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    try {
+      let response;
+      if (isRescheduleMode) {
+        response = await fetch(`http://localhost:5000/api/appointments/${rescheduleTargetId}/reschedule`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            scheduledFor: newAppt.scheduledFor,
+            triageSymptoms: newAppt.triageSymptoms
+          })
+        });
+      } else {
+        response = await fetch('http://localhost:5000/api/appointments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            ...newAppt,
+            patientId: user?.role === 'PATIENT' ? 'self' : newAppt.patientId
+          })
+        });
+      }
+
       const data = await response.json();
       if (response.ok) {
         setIsModalOpen(false);
         setNewAppt({ patientId: '', scheduledFor: '', triageSymptoms: '', aiUrgencyScore: 'LOW' });
+        setIsRescheduleMode(false);
+        setRescheduleTargetId(null);
+        setTriageSuggestion(null);
         fetchQueue();
       } else {
         setModalError(data.message || 'Failed to schedule appointment');
@@ -112,6 +173,7 @@ const AppointmentsQueue = () => {
       setIsSubmitting(false);
     }
   };
+
 
   const formatTime = (timeStr) => {
     try {
@@ -166,10 +228,15 @@ const AppointmentsQueue = () => {
             </select>
           </div>
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setIsRescheduleMode(false);
+              setNewAppt({ patientId: user?.role === 'PATIENT' ? 'self' : '', scheduledFor: '', triageSymptoms: '', aiUrgencyScore: 'LOW' });
+              setTriageSuggestion(null);
+              setIsModalOpen(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white font-bold rounded-xl shadow-[0_4px_14px_0_rgba(249,115,22,0.39)] hover:bg-orange-600 transition-all cursor-pointer border-none"
           >
-            + Walk-in Appointment
+            {user?.role === 'PATIENT' ? '+ Book Appointment' : '+ Walk-in Appointment'}
           </button>
         </div>
       </div>
@@ -261,34 +328,75 @@ const AppointmentsQueue = () => {
                         apt.status === 'CONFIRMED' || apt.status === 'Checked-In' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
                         apt.status === 'CANCELLED' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-amber-50 text-amber-600 border-amber-100'
                       }`}>
-                        {apt.status}
+                        {apt.status === 'PENDING' ? 'Pending Approval' : 
+                         apt.status === 'CANCELLED' ? 'Not Approved' : 
+                         apt.status === 'CONFIRMED' ? 'Approved' : apt.status}
                       </span>
                     </td>
                     <td className="py-4 px-4 max-w-[200px]">
-                      <div className="flex items-start gap-2">
-                        {apt.ai_urgency_score === 'HIGH' && <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 shrink-0 animate-pulse"></div>}
-                        <p className="text-sm text-slate-600 truncate m-0">{apt.triage_symptoms || 'No symptoms noted.'}</p>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-start gap-2">
+                          {apt.ai_urgency_score === 'HIGH' && <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 shrink-0 animate-pulse"></div>}
+                          <p className="text-sm text-slate-600 truncate m-0">{apt.triage_symptoms || 'No symptoms noted.'}</p>
+                        </div>
+                        {user?.role === 'PATIENT' && apt.status === 'CANCELLED' && (
+                          <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-100 w-fit mt-1">
+                            Doctor requested date change. Please reschedule.
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="py-4 px-4">
                       <div className="flex gap-2">
-                        {apt.status === 'PENDING' && (
-                          <button 
-                            onClick={() => handleStatusChange(apt.id, 'CONFIRMED')}
-                            className="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer border-none bg-transparent"
-                            title="Confirm Appointment"
-                          >
-                            <Check size={18} />
-                          </button>
+                        {/* Doctor & Staff Actions */}
+                        {(user?.role === 'DOCTOR' || user?.role === 'STAFF') && (
+                          <>
+                            {apt.status === 'PENDING' && (
+                              <button 
+                                onClick={() => handleStatusChange(apt.id, 'CONFIRMED')}
+                                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer border-none bg-transparent"
+                                title="Approve Appointment"
+                              >
+                                <Check size={18} />
+                              </button>
+                            )}
+                            {apt.status !== 'CANCELLED' && apt.status !== 'COMPLETED' && (
+                              <button 
+                                onClick={() => handleStatusChange(apt.id, 'CANCELLED')}
+                                className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer border-none bg-transparent"
+                                title="Reject Appointment"
+                              >
+                                <X size={18} />
+                              </button>
+                            )}
+                          </>
                         )}
-                        {apt.status !== 'CANCELLED' && apt.status !== 'COMPLETED' && (
-                          <button 
-                            onClick={() => handleStatusChange(apt.id, 'CANCELLED')}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer border-none bg-transparent"
-                            title="Cancel Appointment"
-                          >
-                            <X size={18} />
-                          </button>
+                        
+                        {/* Patient Actions */}
+                        {user?.role === 'PATIENT' && (
+                          <>
+                            {apt.status === 'CANCELLED' ? (
+                              <button 
+                                onClick={() => {
+                                  setNewAppt({
+                                    patientId: 'self',
+                                    scheduledFor: apt.scheduled_for ? apt.scheduled_for.substring(0, 16) : '',
+                                    triageSymptoms: apt.triage_symptoms || '',
+                                    aiUrgencyScore: apt.ai_urgency_score || 'LOW'
+                                  });
+                                  setIsRescheduleMode(true);
+                                  setRescheduleTargetId(apt.id);
+                                  setTriageSuggestion(null);
+                                  setIsModalOpen(true);
+                                }}
+                                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg text-xs cursor-pointer border-none shadow-sm transition-all"
+                              >
+                                Reschedule
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400 font-semibold italic">No actions</span>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
@@ -305,7 +413,9 @@ const AppointmentsQueue = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-slate-800 m-0">Schedule Appointment</h2>
+              <h2 className="text-xl font-bold text-slate-800 m-0">
+                {isRescheduleMode ? 'Reschedule Appointment' : (user?.role === 'PATIENT' ? 'Book Appointment' : 'Schedule Appointment')}
+              </h2>
               <button onClick={() => setIsModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-xl cursor-pointer border-none">
                 <X size={18} />
               </button>
@@ -318,20 +428,22 @@ const AppointmentsQueue = () => {
             )}
 
             <form onSubmit={handleScheduleSubmit} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1.5 ml-1">Select Patient</label>
-                <select 
-                  className="w-full bg-[#f4f7fb] px-4 py-3 rounded-2xl border border-transparent font-medium text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/20"
-                  value={newAppt.patientId}
-                  onChange={(e) => setNewAppt({ ...newAppt, patientId: e.target.value })}
-                  required
-                >
-                  <option value="">-- Choose Patient --</option>
-                  {patients.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.id.substring(0,8)})</option>
-                  ))}
-                </select>
-              </div>
+              {user?.role !== 'PATIENT' && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-600 mb-1.5 ml-1">Select Patient</label>
+                  <select 
+                    className="w-full bg-[#f4f7fb] px-4 py-3 rounded-2xl border border-transparent font-medium text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/20"
+                    value={newAppt.patientId}
+                    onChange={(e) => setNewAppt({ ...newAppt, patientId: e.target.value })}
+                    required
+                  >
+                    <option value="">-- Choose Patient --</option>
+                    {patients.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} ({p.id.substring(0,8)})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-slate-600 mb-1.5 ml-1">Date & Time</label>
@@ -345,7 +457,17 @@ const AppointmentsQueue = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1.5 ml-1">Triage Symptoms / Reason</label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-sm font-semibold text-slate-600 ml-1">Triage Symptoms / Reason</label>
+                  <button
+                    type="button"
+                    onClick={handleAiTriage}
+                    disabled={isTriageLoading}
+                    className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-600 text-[10px] font-bold rounded-lg border border-orange-200/50 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    {isTriageLoading ? 'Analyzing...' : 'Suggest Urgency with AI'}
+                  </button>
+                </div>
                 <textarea 
                   rows="3"
                   placeholder="Mild fever, telemedicine follow-up..."
@@ -353,6 +475,11 @@ const AppointmentsQueue = () => {
                   value={newAppt.triageSymptoms}
                   onChange={(e) => setNewAppt({ ...newAppt, triageSymptoms: e.target.value })}
                 />
+                {triageSuggestion && (
+                  <div className="mt-2 p-3 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-xl border border-emerald-100/60 leading-relaxed animate-in fade-in duration-200">
+                    💡 **AI Suggestion**: Urgency set to **{newAppt.aiUrgencyScore}**. {triageSuggestion}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -373,7 +500,7 @@ const AppointmentsQueue = () => {
                 disabled={isSubmitting}
                 className="mt-2 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-2xl shadow-md cursor-pointer border-none transition-all disabled:opacity-75"
               >
-                {isSubmitting ? 'Scheduling...' : 'Schedule Appointment'}
+                {isSubmitting ? 'Processing...' : (isRescheduleMode ? 'Update Appointment' : (user?.role === 'PATIENT' ? 'Request Appointment' : 'Schedule Appointment'))}
               </button>
             </form>
           </div>
